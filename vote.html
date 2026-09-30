@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>国試クイズ 回答</title>
+<style>
+:root{--navy:#0D2340;--teal:#006E7F;--gold:#D4A017;--bg:#F3F6F9;--ink:#1a2233;--card:#fff;--line:#d5dde6;--mute:#5b6675}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1722;--ink:#e8edf3;--card:#1a2534;--line:#2c3b4f;--mute:#9aa8ba}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Meiryo","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+header{background:var(--navy);color:#fff;padding:12px 16px}
+header h1{margin:0;font-size:16px}
+header p{margin:2px 0 0;font-size:12px;color:#b9c6d8}
+main{max-width:480px;margin:0 auto;padding:12px 16px 32px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px;-webkit-overflow-scrolling:touch}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:8px 12px;font-size:13px;font-family:inherit}
+.chip[aria-current=true]{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:700}
+.chip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold);margin-left:6px}
+.qid{font-size:22px;font-weight:700;margin:6px 0 2px}
+.hint{font-size:13px;color:var(--mute);margin:0 0 12px}
+.opts{display:grid;gap:10px}
+.opt{display:flex;align-items:center;gap:14px;width:100%;min-height:64px;padding:0 16px;border:2px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;font-size:18px;font-family:inherit;text-align:left}
+.opt .l{flex:none;width:38px;height:38px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:grid;place-items:center;font-weight:700;font-size:18px}
+.opt[aria-pressed=true]{border-color:var(--teal);background:var(--teal);color:#fff}
+.opt[aria-pressed=true] .l{background:#fff;color:var(--teal);border-color:#fff}
+.opt:disabled{opacity:.55}
+.status{margin-top:14px;min-height:22px;font-size:14px}
+.ok{color:var(--teal);font-weight:700}.warn{color:#b3261e}
+.note{margin-top:18px;font-size:12px;color:var(--mute);line-height:1.6}
+</style>
+</head>
+<body>
+<header><h1>国試クイズ 回答</h1><p>スクリーンを見て、a〜e を1つタップ（何度でも変更できます・匿名）</p></header>
+<main>
+  <div class="chips" id="chips"></div>
+  <div class="qid" id="qid"></div>
+  <p class="hint">選択肢はスクリーンに表示されています</p>
+  <div class="opts" id="opts"></div>
+  <div class="status" id="status" role="status" aria-live="polite"></div>
+  <div class="note">回答は匿名で集計されます。押し直すと回答が上書きされます。</div>
+</main>
+<script src="config.js"></script>
+<script>
+(function(){
+  var QS = window.POLL_QIDS, API = window.POLL_API;
+  var q = new URLSearchParams(location.search).get('q');
+  if (QS.indexOf(q) < 0) q = QS[0];
+  var mem = {};
+  function store(k, v){ try{ if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v);}catch(e){ if (v === undefined) return mem[k]||null; mem[k]=v; } }
+  var id = store('pollid');
+  if (!id){ id = Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-3); store('pollid', id); }
+  var $ = function(s){ return document.getElementById(s); };
+  var LET = ['a','b','c','d','e'];
+
+  function render(){
+    $('qid').textContent = '問題 ' + q;
+    var ch = $('chips'); ch.innerHTML = '';
+    QS.forEach(function(k){
+      var b = document.createElement('button'); b.className = 'chip'; b.textContent = k;
+      if (k === q) b.setAttribute('aria-current','true');
+      if (store('ans_'+k)) { var d = document.createElement('span'); d.className='dot'; b.appendChild(d); }
+      b.onclick = function(){ q = k; history.replaceState(null,'','?q='+k); $('status').textContent=''; render(); };
+      ch.appendChild(b);
+    });
+    var o = $('opts'); o.innerHTML = '';
+    var cur = store('ans_'+q);
+    LET.forEach(function(l){
+      var b = document.createElement('button'); b.className='opt'; b.type='button';
+      b.setAttribute('aria-pressed', cur === l ? 'true' : 'false');
+      b.innerHTML = '<span class="l">'+l+'</span><span>'+l+'</span>';
+      b.onclick = function(){ vote(l); };
+      o.appendChild(b);
+    });
+    if (cur) setStatus('✓ ' + cur + ' で回答済み（押し直すと変更できます）', 'ok');
+  }
+  function setStatus(t, cls){ var s=$('status'); s.textContent=t; s.className='status '+(cls||''); }
+
+  function vote(l, tries){
+    tries = tries || 0;
+    if (!API){ setStatus('集計サーバーが未設定です（config.js）','warn'); return; }
+    var qq = q;
+    setStatus('送信中…');
+    fetch(API + '?a=vote&q=' + qq + '&c=' + l + '&id=' + encodeURIComponent(id))
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j.ok) throw new Error(j.error||'error');
+        if (!j.open){ setStatus('この問題は締め切られました','warn'); return; }
+        store('ans_'+qq, l);
+        if (qq === q) render();
+      })
+      .catch(function(){
+        if (tries < 5){ setStatus('混み合っています。再送中…（'+(tries+1)+'/5）'); setTimeout(function(){ vote(l, tries+1); }, 600 + Math.random()*1800); }
+        else setStatus('送信できませんでした。電波を確認してもう一度押してください','warn');
+      });
+  }
+  render();
+})();
+</script>
+</body>
+</html>
